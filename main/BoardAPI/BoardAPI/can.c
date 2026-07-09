@@ -15,7 +15,7 @@
 #define MAX(a, b)  (((a) > (b)) ? (a) : (b))
 #endif /* MAX */
 
-int ok = 100 ;
+
 const CAN_FilterTypeDef CAN1_FILTER_DEFAULT = {
 	.FilterIdHigh = 0,
 	.FilterIdLow = 0,
@@ -119,7 +119,7 @@ void can2_transmit(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtende
 	TxHeader.IDE = isExtended ? CAN_ID_EXT : CAN_ID_STD;
 	TxHeader.RTR = isRemote ? CAN_RTR_REMOTE : CAN_RTR_DATA;
 	TxHeader.TransmitGlobalTime = DISABLE;
-	ok = can2_txAvailable();
+
 	while(can2_txAvailable() == 0);
 	HAL_CAN_AddTxMessage(&hcan2, &TxHeader, txBuffer, &TxMailbox);
 }

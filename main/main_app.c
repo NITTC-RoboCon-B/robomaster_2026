@@ -11,6 +11,10 @@
 
 #define CAN_QUEUE_CAPACITY 64
 
+#define robomaster_m3508_ratio 19
+#define robomaster_m2006_ratio 36
+
+
 typedef struct {
 	uint32_t id;
 	uint8_t data[8];
@@ -32,15 +36,21 @@ static void can2_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExte
 static void can1_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote);
 static void can2_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote);
 
-static void robomaster_transmitfeedbuck ();
+static void robomaster_transmitfeedbuck();
+static void robomaster_test(int mode,float value);
 
 static CanPacket can2_rxPacket = {0};
+//test
+float testmoter_val = 0;
+int moter_mode = 0;
+//
 
 float wheel_val = 0;
 float test_speed = 0;
 
-uint32_t temp_data[3]= {0};
 uint8_t fbsend_data[8] = {0};
+uint32_t temp_data[3]= {0};
+uint8_t temp_actuatorid[8] = {0};
 
 RoboMaster *robomaster_temp;
 
@@ -48,6 +58,11 @@ RoboMaster *robomaster_temp;
 uint32_t mailbox_checker = 0;
 uint32_t can2_ErrorChecker = 0;
 uint32_t can2_ModeChecker = 0;
+
+uint8_t gatekey_id[2] = {0};
+uint8_t temp_id[3] = {0};
+
+float moter_val = 0;
 
 
 void setup() {
@@ -111,12 +126,16 @@ void loop() {
 			can2_transmit(canPacket.id, canPacket.data, canPacket.dlc, canPacket.isExtended, canPacket.isRemote);
 		}
 	}
+
+
+
 	mailbox_checker = can2_txAvailable();
 	can2_ErrorChecker = HAL_CAN_GetError(&hcan2);
 	can2_ModeChecker = hcan2.Init.Mode;
 }
 
 static void task1kHz() {
+
 	static uint32_t tick = 0;
 
 	for (uint8_t i = 0; i < 8; i++)
@@ -127,6 +146,7 @@ static void task1kHz() {
 
 	if(tick % 10 == 0) robomaster_transmitfeedbuck();//send ros_node
 
+	robomaster_test(moter_mode,testmoter_val);
 
 
 	gpio_setLedR((tick % 1000 < 500) ? GPIO_PIN_SET : GPIO_PIN_RESET);
@@ -140,30 +160,76 @@ static void can1_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExte
 }
 
 static void can2_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote) {
+
+	int board_id = 1;
+
 	can2_rxPacket.id = id;
 	memcpy(can2_rxPacket.data, data, dlc);
 	can2_rxPacket.dlc = dlc;
 	can2_rxPacket.isExtended = isExtended;
 	can2_rxPacket.isRemote = isRemote;
 
-	if (id == 0x100 && dlc == 8 && isExtended == false && isRemote == false) {
-		memcpy(&wheel_val,&data[2],sizeof(float));
+//	uint8_t gatekey_id[2] = {0};
 
-		switch(data[1]){
+	gatekey_id[0] = (can2_rxPacket.id >> 24) & ((1 << 3) - 1);
+	gatekey_id[1] = (can2_rxPacket.id >> 20) & ((1 << 4) - 1);
+
+	if(gatekey_id[0] == 0 && gatekey_id[1] == board_id){
+
+		temp_id[0] =  can2_rxPacket.id        & ((1 << 8) - 1);
+		temp_id[1] = (can2_rxPacket.id >> 8)  & ((1 << 8) - 1);
+		temp_id[2] = (can2_rxPacket.id >> 16) & ((1 << 4) - 1);
+
+
+
+
+		memcpy(&moter_val,&can2_rxPacket.data,sizeof(float));
+
+		switch(temp_id[0]){
 			case 0:
-				RoboMaster_setTargetPosition(&robomasters.robomaster[data[0]],wheel_val);
+				RoboMaster_setTargetCurrent(&robomasters.robomaster[temp_id[1]],moter_val);
 				break;
 			case 1:
-				wheel_val = wheel_val * 36;
-				RoboMaster_setTargetVelocity(&robomasters.robomaster[data[0]],wheel_val);
+				if(temp_id[2] == 0) moter_val = moter_val * robomaster_m2006_ratio;
+				else moter_val = moter_val * robomaster_m3508_ratio;
+				RoboMaster_setTargetVelocity(&robomasters.robomaster[temp_id[1]],moter_val);
 				break;
 			case 2:
-				RoboMaster_setTargetCurrent(&robomasters.robomaster[data[0]],wheel_val);
+				if(temp_id[2] == 0) moter_val = moter_val * robomaster_m2006_ratio;
+				else moter_val = moter_val * robomaster_m3508_ratio;
+				RoboMaster_setTargetPosition(&robomasters.robomaster[temp_id[1]],moter_val);
 				break;
 			default:
 				break;
 		}
+
+		temp_actuatorid[temp_id[1]] = temp_id[2];
 	}
+
+//
+//
+//
+//
+//
+//	if (id == 0x100 && dlc == 8 && isExtended == true && isRemote == false) {
+//
+//		memcpy(&wheel_val,&data[2],sizeof(float));
+//
+//		switch(data[1]){
+//			case 0:
+//				RoboMaster_setTargetPosition(&robomasters.robomaster[data[0]],wheel_val);
+//				break;
+//			case 1:
+//				wheel_val = wheel_val * 36;
+//				RoboMaster_setTargetVelocity(&robomasters.robomaster[data[0]],wheel_val);
+//				break;
+//			case 2:
+//				RoboMaster_setTargetCurrent(&robomasters.robomaster[data[0]],wheel_val);
+//				break;
+//			default:
+//				break;
+//		}
+//	}
 }
 
 static void can1_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote) {
@@ -195,28 +261,72 @@ static void can2_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bo
 
 
 static void robomaster_transmitfeedbuck(){
+
+	uint32_t send_id = 0;
+	//id_set
+	uint8_t priority  = 1;
+	uint8_t type	  = 1;
+
+	uint8_t board_id  = 1;
+	uint8_t actuator  = 0;
+	uint8_t device_id = 0;
+	uint8_t mode      = 0;
 	for(int id = 0; id < 8; id ++){
+		device_id = id; // device_id
+		actuator = temp_actuatorid[id]; // actuator
+		send_id =
+		 (priority << 27) |
+		 (type << 24) 	  |
+		 (board_id << 20) |
+		 (actuator << 16) |
+		 (device_id << 8) |
+		 (mode);
+
+
 		robomaster_temp = &robomasters.robomaster[id];
 
-		memcpy(&temp_data[0],&robomaster_temp->feedback.position,sizeof(float));
-		memcpy(&temp_data[1],&robomaster_temp->feedback.velocity,sizeof(float));
-		memcpy(&temp_data[2],&robomaster_temp->feedback.current,sizeof(float));
+		uint8_t send_data[8] = {0};
+		int16_t tempcast_val[2] = {0};
+		float temp_position = robomaster_temp->feedback.position / 36;
+		tempcast_val[0] =(int16_t)(robomaster_temp->feedback.velocity * 100 / 36);
+		tempcast_val[1] =(int16_t)(robomaster_temp->feedback.current);
 
-		fbsend_data [0] = id + 1;
-				for(int i = 0; i < 3; i ++){
-					fbsend_data[1] = i;
-					for(int k = 0; k < 4 ; k++){
-						fbsend_data[k + 2] = (temp_data[i] >> (8 * (3 - k))) & 0xff;
-					}
-					can2_transmitQueue(0x600,fbsend_data,8,false,false);
-				}
-			}
+		memcpy(&send_data[0],&temp_position,sizeof(float));
+		memcpy(&send_data[4],&tempcast_val[0],sizeof(int16_t));
+		memcpy(&send_data[6],&tempcast_val[1],sizeof(int16_t));
+
+
+		//リトルエディアン変換
+//		int counter = 0;
+//		int dataset_counter = 0;
+//		for(int i = 0; i < 3; i ++){
+//			dataset_counter += data_set[i];
+//			for(int k = 0; k < data_set[i]; k ++){
+//				send_data[counter] = temp_data[dataset_counter - k - 1];
+//				counter ++;
+//			}
+//
+//		}
+		can2_transmitQueue(send_id,send_data,8,true,false);
 	}
+}
 
 
+static void robomaster_test(int mode,float value){
 
+	switch(mode){
+		case 0:
+			RoboMaster_setTargetPosition(&robomasters.robomaster[0],value);
+			break;
+		case 1:
+			RoboMaster_setTargetVelocity(&robomasters.robomaster[0],value);
+			break;
+		case 2:
+			RoboMaster_setTargetCurrent(&robomasters.robomaster[0],value);
+			break;
+		default:
+			break;
+		}
 
-
-
-
+}
 
