@@ -29,6 +29,9 @@ uint64_t timer_getUs64();
 void timer_stopUs();
 void timer_stop1kHzTask();
 
+
+
+
 #ifdef __cplusplus
 }
 #endif

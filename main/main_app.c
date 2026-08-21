@@ -36,21 +36,26 @@ static void can2_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExte
 static void can1_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote);
 static void can2_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote);
 
+static void usrbtnPressed();
+static void usrbtnReleased();
+
+
+
+
 static void robomaster_transmitfeedbuck();
+
+#ifdef UseRobomastertest
 static void robomaster_test(int mode,float value);
+#endif
 
 static CanPacket can2_rxPacket = {0};
-//test
-float testmoter_val = 0;
-int moter_mode = 0;
-//
 
 float wheel_val = 0;
 float test_speed = 0;
 
 uint8_t fbsend_data[8] = {0};
 uint32_t temp_data[3]= {0};
-uint8_t temp_actuatorid[8] = {0};
+uint8_t temp_actuator[8] = {0};
 
 RoboMaster *robomaster_temp;
 
@@ -62,13 +67,24 @@ uint32_t can2_ModeChecker = 0;
 uint8_t gatekey_id[2] = {0};
 uint8_t temp_id[3] = {0};
 
+uint8_t press_counter = 0;
+
+//board set number
+bool btnkey = 0;
+
+uint32_t Board_id = 0;
+//
+
+//number of check necessary motor
 float moter_val = 0;
+int usemoter_count = 0;
+int usemoter_ID[8]= {10,10,10,10,10,10,10,10};
 
 
 void setup() {
 
 
-
+	flash_read(&Board_id,1);
 	timer_startUs();
 
 	RoboMasters_setTxFunc(&robomasters, can1_transmitQueue);
@@ -97,6 +113,9 @@ void setup() {
 	Queue_init(&can2_txQueue, can2_txBuffer, sizeof(CanPacket), CAN_QUEUE_CAPACITY, 0, disable_irq_nest, enable_irq_nest);
 
 	HAL_Delay(500);
+
+	gpio_setUsrBtnPressedCallback(usrbtnPressed);
+	gpio_setUsrBtnReleasedCallback(usrbtnReleased);
 
 	timer_set1kHzTask(task1kHz);
 	timer_start1kHzTask();
@@ -134,6 +153,18 @@ void loop() {
 	can2_ModeChecker = hcan2.Init.Mode;
 }
 
+
+
+
+static void usrbtnPressed(){
+	btnkey = 1;
+};
+
+static void usrbtnReleased(){
+
+};
+
+
 static void task1kHz() {
 
 	static uint32_t tick = 0;
@@ -144,15 +175,25 @@ static void task1kHz() {
 	}
 	RoboMaster_transmit(&robomasters);
 
-	if(tick % 10 == 0) robomaster_transmitfeedbuck();//send ros_node
-
-	robomaster_test(moter_mode,testmoter_val);
-
+	if(tick % 100 == 0) robomaster_transmitfeedbuck();//send ros_node
 
 	gpio_setLedR((tick % 1000 < 500) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-	tick++;
+	static uint32_t press_counter = 0;
+	static uint32_t btninterval_checker = 0;
 
+	if(btnkey == 1){
+		press_counter ++;
+		btnkey = 0;
+		btninterval_checker = tick;
+	}
+
+	if(tick >= btninterval_checker + 1000 && press_counter != 0){
+		Board_id = press_counter - 1;
+		press_counter = 0;
+		flash_write(&Board_id,1);
+	}
+	tick++;
 }
 
 static void can1_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote) {
@@ -160,8 +201,6 @@ static void can1_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExte
 }
 
 static void can2_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote) {
-
-	int board_id = 1;
 
 	can2_rxPacket.id = id;
 	memcpy(can2_rxPacket.data, data, dlc);
@@ -174,12 +213,11 @@ static void can2_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExte
 	gatekey_id[0] = (can2_rxPacket.id >> 24) & ((1 << 3) - 1);
 	gatekey_id[1] = (can2_rxPacket.id >> 20) & ((1 << 4) - 1);
 
-	if(gatekey_id[0] == 0 && gatekey_id[1] == board_id){
+	if(gatekey_id[0] == 0 && gatekey_id[1] == Board_id){
 
 		temp_id[0] =  can2_rxPacket.id        & ((1 << 8) - 1);
 		temp_id[1] = (can2_rxPacket.id >> 8)  & ((1 << 8) - 1);
 		temp_id[2] = (can2_rxPacket.id >> 16) & ((1 << 4) - 1);
-
 
 
 
@@ -203,37 +241,18 @@ static void can2_rxCallback(uint32_t id, uint8_t *data, uint8_t dlc, bool isExte
 				break;
 		}
 
-		temp_actuatorid[temp_id[1]] = temp_id[2];
-	}
-
-//
-//
-//
-//
-//
-//	if (id == 0x100 && dlc == 8 && isExtended == true && isRemote == false) {
-//
-//		memcpy(&wheel_val,&data[2],sizeof(float));
-//
-//		switch(data[1]){
-//			case 0:
-//				RoboMaster_setTargetPosition(&robomasters.robomaster[data[0]],wheel_val);
-//				break;
-//			case 1:
-//				wheel_val = wheel_val * 36;
-//				RoboMaster_setTargetVelocity(&robomasters.robomaster[data[0]],wheel_val);
-//				break;
-//			case 2:
-//				RoboMaster_setTargetCurrent(&robomasters.robomaster[data[0]],wheel_val);
-//				break;
-//			default:
-//				break;
+//		for(int i = 0;i <= usemoter_count; i ++){
+//			if(usemoter_ID[i] != temp_id[1]){
+//			usemoter_count ++;
+//			}
+//			temp_actuator[temp_id[1]] = temp_id[2];
 //		}
-//	}
+	}
 }
 
 static void can1_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bool isExtended, bool isRemote) {
 	if (dlc > 8) return;
+
 
 	CanPacket packet;
 	packet.id = id;
@@ -254,7 +273,6 @@ static void can2_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bo
 	packet.dlc = dlc;
 	packet.isExtended = isExtended;
 	packet.isRemote = isRemote;
-
 	Queue_push(&can2_txQueue, &packet);
 }
 
@@ -266,14 +284,13 @@ static void robomaster_transmitfeedbuck(){
 	//id_set
 	uint8_t priority  = 1;
 	uint8_t type	  = 1;
-
-	uint8_t board_id  = 1;
+	uint8_t board_id  = Board_id;
 	uint8_t actuator  = 0;
 	uint8_t device_id = 0;
 	uint8_t mode      = 0;
 	for(int id = 0; id < 8; id ++){
 		device_id = id; // device_id
-		actuator = temp_actuatorid[id]; // actuator
+		actuator = temp_actuator[id]; // actuator
 		send_id =
 		 (priority << 27) |
 		 (type << 24) 	  |
@@ -281,7 +298,6 @@ static void robomaster_transmitfeedbuck(){
 		 (actuator << 16) |
 		 (device_id << 8) |
 		 (mode);
-
 
 		robomaster_temp = &robomasters.robomaster[id];
 
@@ -294,23 +310,14 @@ static void robomaster_transmitfeedbuck(){
 		memcpy(&send_data[0],&temp_position,sizeof(float));
 		memcpy(&send_data[4],&tempcast_val[0],sizeof(int16_t));
 		memcpy(&send_data[6],&tempcast_val[1],sizeof(int16_t));
-
-
-		//リトルエディアン変換
-//		int counter = 0;
-//		int dataset_counter = 0;
-//		for(int i = 0; i < 3; i ++){
-//			dataset_counter += data_set[i];
-//			for(int k = 0; k < data_set[i]; k ++){
-//				send_data[counter] = temp_data[dataset_counter - k - 1];
-//				counter ++;
-//			}
-//
-//		}
 		can2_transmitQueue(send_id,send_data,8,true,false);
 	}
 }
 
+
+
+
+#ifdef UseRobomastertest
 
 static void robomaster_test(int mode,float value){
 
@@ -329,4 +336,7 @@ static void robomaster_test(int mode,float value){
 		}
 
 }
+
+#endif
+
 
