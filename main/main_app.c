@@ -280,6 +280,8 @@ static void can2_transmitQueue(uint32_t id, const uint8_t *data, uint8_t dlc, bo
 
 static void robomaster_transmitfeedbuck(){
 
+	uint32_t time_out = 200;
+
 	uint32_t send_id = 0;
 	//id_set
 	uint8_t priority  = 1;
@@ -289,6 +291,8 @@ static void robomaster_transmitfeedbuck(){
 	uint8_t device_id = 0;
 	uint8_t mode      = 0;
 	for(int id = 0; id < 8; id ++){
+		uint32_t tick = HAL_GetTick();
+		if(abs(tick - robomasters.robomaster[id].feedback.lastFeedbackTime) > time_out) continue;
 		device_id = id; // device_id
 		actuator = temp_actuator[id]; // actuator
 		send_id =
